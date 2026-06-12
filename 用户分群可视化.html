@@ -1,0 +1,559 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>用户分群可视化 - 5.25-5.31</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: #1a1a2e;
+    color: #eee;
+    min-height: 100vh;
+    padding: 20px;
+}
+h1 { font-size: 22px; margin-bottom: 6px; color: #fff; text-align: center; }
+.subtitle { font-size: 13px; color: #aaa; margin-bottom: 16px; text-align: center; line-height: 1.6; }
+
+.page-layout {
+    display: flex;
+    width: 100%;
+    justify-content: center;
+    gap: 20px;
+}
+.spacer { flex: 1; max-width: 25%; }
+.center-content { flex: 0 1 50%; min-width: 550px; max-width: 800px; }
+.right-panel-wrap { flex: 0 0 350px; }
+
+/* Legend */
+.legend { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; justify-content: center; }
+.legend-item {
+    display: flex; align-items: center; gap: 5px;
+    padding: 4px 10px; border-radius: 5px; cursor: pointer;
+    transition: all 0.15s; border: 2px solid transparent; user-select: none;
+    font-size: 12px; background: rgba(255,255,255,0.03);
+}
+.legend-item:hover { background: rgba(255,255,255,0.08); }
+.legend-item.active { border-color: rgba(255,255,255,0.6); background: rgba(255,255,255,0.06); }
+.legend-item.inactive { opacity: 0.3; text-decoration: line-through; }
+.legend-item .dot { width: 14px; height: 14px; border-radius: 3px; flex-shrink: 0; }
+.legend-item .info { color: #999; font-size: 11px; margin-left: 4px; }
+
+/* Chart */
+.chart-wrapper {
+    position: relative;
+}
+.chart-box {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 5/3;
+    background: #0a1628;
+    border-radius: 10px;
+    border: 1px solid #2a3a5a;
+    overflow: hidden;
+    cursor: grab;
+}
+.chart-box.dragging { cursor: grabbing; }
+.chart-inner {
+    position: absolute;
+    top: 0; left: 0; width: 100%; height: 100%;
+    transform-origin: 0 0;
+    transition: transform 0.08s ease-out;
+}
+.chart-box.dragging .chart-inner { transition: none; }
+.zoom-controls {
+    position: absolute; top: 8px; right: 8px; z-index: 50;
+    display: flex; flex-direction: column; gap: 4px;
+}
+.zoom-controls button {
+    width: 28px; height: 28px; border: 1px solid #3a4a6a;
+    background: rgba(15,26,48,0.9); color: #aaa; border-radius: 4px;
+    cursor: pointer; font-size: 14px; line-height: 1;
+    display: flex; align-items: center; justify-content: center;
+}
+.zoom-controls button:hover { background: #1a2a4a; color: #fff; border-color: #4fc3f7; }
+.zoom-info {
+    position: absolute; bottom: 8px; left: 8px; z-index: 50;
+    font-size: 11px; color: #556; background: rgba(15,26,48,0.8);
+    padding: 2px 6px; border-radius: 3px;
+}
+.block-cell {
+    position: absolute;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer; transition: all 0.12s;
+    border: 1px solid rgba(255,255,255,0.08);
+    overflow: hidden;
+}
+.block-cell:hover {
+    border-color: rgba(255,255,255,0.7);
+    z-index: 100 !important;
+    filter: brightness(1.2);
+}
+.block-cell.selected {
+    border: 2.5px solid #fff;
+    box-shadow: 0 0 12px rgba(255,255,255,0.4);
+    z-index: 101 !important;
+}
+.cell-inner {
+    text-align: center; pointer-events: none;
+    text-shadow: 0 1px 4px rgba(0,0,0,0.9);
+    line-height: 1.4;
+}
+.cell-inner .cond-dots { margin-bottom: 2px; }
+.cell-inner .cond-dots span { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin: 0 1px; }
+.cell-inner .num { font-size: 12px; font-weight: 600; color: #fff; }
+.cell-inner .pct { font-size: 10px; color: rgba(255,255,255,0.7); }
+
+/* None block */
+.none-section {
+    margin-top: 12px; background: #0f1a30; border-radius: 8px;
+    padding: 10px 14px; cursor: pointer; border: 2px solid transparent;
+    transition: all 0.15s; display: flex; align-items: center; gap: 12px;
+}
+.none-section:hover { border-color: #3a4a6a; }
+.none-section.selected { border-color: #4fc3f7; }
+.none-section .none-color { width: 24px; height: 24px; background: #2a3040; border-radius: 4px; flex-shrink: 0; }
+.none-section .none-info h4 { font-size: 13px; color: #aaa; }
+.none-section .none-info p { font-size: 12px; color: #666; }
+
+/* Tooltip */
+.tooltip {
+    position: fixed; background: rgba(8,12,28,0.96); color: #fff;
+    padding: 12px 16px; border-radius: 8px; font-size: 13px;
+    pointer-events: none; z-index: 9999; max-width: 340px;
+    display: none; line-height: 1.7; border: 1px solid #3a4a6a;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+}
+.tooltip.visible { display: block; }
+
+/* Right panel */
+.right-panel {
+    background: #0f1a30; border-radius: 8px; padding: 14px;
+    max-height: 85vh; overflow-y: auto; display: none;
+    position: sticky; top: 20px; border: 1px solid #2a3a5a;
+}
+.right-panel.visible { display: block; }
+.right-panel .rp-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; }
+.right-panel h3 { font-size: 14px; color: #4fc3f7; }
+.right-panel .close-btn { cursor: pointer; color: #666; font-size: 20px; line-height: 1; padding: 0 4px; }
+.right-panel .close-btn:hover { color: #fff; }
+.right-panel .block-def { font-size: 12px; color: #bbb; margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid #2a3a5a; line-height: 1.7; }
+.right-panel .user-list { font-family: 'Cascadia Code', 'Courier New', monospace; font-size: 11px; line-height: 1.5; color: #8899aa; max-height: 62vh; overflow-y: auto; }
+.right-panel .user-list div { padding: 3px 6px; border-bottom: 1px solid #0a1020; }
+.right-panel .user-list div:nth-child(even) { background: rgba(255,255,255,0.02); }
+.right-panel .user-list div:hover { background: #1a2a4a; color: #fff; }
+.right-panel .load-more { text-align: center; padding: 8px; color: #4fc3f7; cursor: pointer; font-size: 12px; }
+.right-panel .load-more:hover { color: #81d4fa; }
+</style>
+</head>
+<body>
+<h1>📊 用户分群可视化 · 5月25日-5月31日</h1>
+<div class="subtitle">
+    总用户数: <strong id="total-users">加载中...</strong> ·
+    口径：活跃日均 = 用户各指标累计值 ÷ 用户有对话的天数（5.25-5.31期间，仅计活跃日）<br>
+    点击图例 → 显示/隐藏该条件 · 悬停区块 → 查看定义+占比 · 点击区块 → 右侧显示用户列表 · 滚轮缩放/拖拽平移
+</div>
+
+<div class="page-layout">
+<div class="spacer"></div>
+<div class="center-content">
+    <div class="legend" id="legend"></div>
+    <div class="chart-wrapper">
+        <div class="chart-box" id="chart-box">
+            <div class="chart-inner" id="chart-inner"></div>
+        </div>
+        <div class="zoom-controls">
+            <button id="zoom-in" title="放大">+</button>
+            <button id="zoom-out" title="缩小">−</button>
+            <button id="zoom-reset" title="重置" style="font-size:11px;">↺</button>
+        </div>
+        <div class="zoom-info" id="zoom-info">100%</div>
+    </div>
+    <div class="none-section" id="none-section">
+        <div class="none-color"></div>
+        <div class="none-info">
+            <h4>未命中任何条件的用户</h4>
+            <p id="none-text">加载中...</p>
+        </div>
+    </div>
+</div>
+<div class="right-panel-wrap">
+    <div class="right-panel" id="right-panel">
+        <div class="rp-header">
+            <h3 id="rp-title">用户列表</h3>
+            <span class="close-btn" id="close-panel">&times;</span>
+        </div>
+        <div class="block-def" id="rp-def"></div>
+        <div class="user-list" id="rp-users"></div>
+    </div>
+</div>
+<div class="spacer"></div>
+</div>
+
+<div class="tooltip" id="tooltip"></div>
+
+<script src="venn_data.js"></script>
+<script>
+const COLORS = [
+    { r: 239, g: 83, b: 80 },   // c1 生图 - red
+    { r: 66, g: 165, b: 245 },  // c2 语音通话 - blue
+    { r: 255, g: 193, b: 7 },   // c3 文字对话 - amber
+    { r: 76, g: 175, b: 80 },   // c4 语音条 - green
+    { r: 156, g: 39, b: 176 }   // c5 Agent - purple
+];
+
+let DATA = null;
+let activeConditions = [true, true, true, true, true];
+let selectedBlockMask = null;
+
+function loadData() {
+    DATA = DATA_RAW;
+    document.getElementById('total-users').textContent = DATA.total_users.toLocaleString();
+    document.getElementById('close-panel').onclick = closePanel;
+    initZoomPan();
+    renderLegend();
+    renderChart();
+    renderNoneBlock();
+}
+
+function closePanel() {
+    selectedBlockMask = null;
+    document.getElementById('right-panel').classList.remove('visible');
+    document.getElementById('none-section').classList.remove('selected');
+    renderChart();
+}
+
+function renderLegend() {
+    const el = document.getElementById('legend');
+    el.innerHTML = '';
+    DATA.labels.forEach((label, i) => {
+        let count = 0;
+        DATA.blocks.forEach(b => { if (b.included.includes(i)) count += b.count; });
+        const item = document.createElement('div');
+        item.className = 'legend-item' + (activeConditions[i] ? ' active' : ' inactive');
+        const c = COLORS[i];
+        item.innerHTML = `<div class="dot" style="background:rgb(${c.r},${c.g},${c.b})"></div>
+            <span>${i+1}. ${label}</span>
+            <span class="info">${count.toLocaleString()}人 ${(count/DATA.total_users*100).toFixed(2)}%</span>`;
+        item.onclick = () => { activeConditions[i] = !activeConditions[i]; renderLegend(); renderChart(); };
+        el.appendChild(item);
+    });
+}
+
+function getBlockColor(included) {
+    if (included.length === 0) return 'rgb(35,45,60)';
+    let r = 0, g = 0, b = 0;
+    included.forEach(i => { r += COLORS[i].r; g += COLORS[i].g; b += COLORS[i].b; });
+    const n = included.length;
+    // Blend with slight saturation boost
+    r = Math.min(255, Math.round(r / n * 1.1));
+    g = Math.min(255, Math.round(g / n * 1.1));
+    b = Math.min(255, Math.round(b / n * 1.1));
+    return `rgb(${r},${g},${b})`;
+}
+
+// Zoom & Pan state
+let zoomLevel = 1;
+let panX = 0, panY = 0;
+let isDragging = false, hasDragged = false, dragStartX = 0, dragStartY = 0, panStartX = 0, panStartY = 0;
+
+function initZoomPan() {
+    const box = document.getElementById('chart-box');
+    const inner = document.getElementById('chart-inner');
+
+    // Mouse wheel zoom
+    box.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        const rect = box.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
+
+        const oldZoom = zoomLevel;
+        const delta = e.deltaY > 0 ? 0.9 : 1.1;
+        zoomLevel = Math.max(1, Math.min(10, zoomLevel * delta));
+
+        // Adjust pan to zoom towards mouse position
+        const scale = zoomLevel / oldZoom;
+        panX = mouseX - scale * (mouseX - panX);
+        panY = mouseY - scale * (mouseY - panY);
+        clampPan(box);
+        applyTransform();
+    }, { passive: false });
+
+    // Drag to pan
+    box.addEventListener('mousedown', (e) => {
+        if (e.button !== 0) return;
+        isDragging = true;
+        hasDragged = false;
+        dragStartX = e.clientX;
+        dragStartY = e.clientY;
+        panStartX = panX;
+        panStartY = panY;
+        box.classList.add('dragging');
+    });
+
+    document.addEventListener('mousemove', (e) => {
+        if (!isDragging) return;
+        const dx = e.clientX - dragStartX;
+        const dy = e.clientY - dragStartY;
+        if (Math.abs(dx) > 3 || Math.abs(dy) > 3) hasDragged = true;
+        if (zoomLevel <= 1) return; // only pan when zoomed
+        panX = panStartX + dx;
+        panY = panStartY + dy;
+        clampPan(box);
+        applyTransform();
+    });
+
+    document.addEventListener('mouseup', () => {
+        if (isDragging) {
+            isDragging = false;
+            box.classList.remove('dragging');
+        }
+    });
+
+    // Buttons
+    document.getElementById('zoom-in').onclick = () => { zoomTo(zoomLevel * 1.3, box); };
+    document.getElementById('zoom-out').onclick = () => { zoomTo(zoomLevel / 1.3, box); };
+    document.getElementById('zoom-reset').onclick = () => { zoomLevel = 1; panX = 0; panY = 0; applyTransform(); };
+}
+
+function zoomTo(newZoom, box) {
+    const rect = box.getBoundingClientRect();
+    const cx = rect.width / 2, cy = rect.height / 2;
+    const oldZoom = zoomLevel;
+    zoomLevel = Math.max(1, Math.min(10, newZoom));
+    const scale = zoomLevel / oldZoom;
+    panX = cx - scale * (cx - panX);
+    panY = cy - scale * (cy - panY);
+    clampPan(box);
+    applyTransform();
+}
+
+function clampPan(box) {
+    const rect = box.getBoundingClientRect();
+    const maxPanX = 0;
+    const minPanX = rect.width * (1 - zoomLevel);
+    const maxPanY = 0;
+    const minPanY = rect.height * (1 - zoomLevel);
+    panX = Math.max(minPanX, Math.min(maxPanX, panX));
+    panY = Math.max(minPanY, Math.min(maxPanY, panY));
+}
+
+function applyTransform() {
+    const inner = document.getElementById('chart-inner');
+    inner.style.transform = `translate(${panX}px, ${panY}px) scale(${zoomLevel})`;
+    document.getElementById('zoom-info').textContent = Math.round(zoomLevel * 100) + '%';
+}
+
+function renderChart() {
+    const container = document.getElementById('chart-inner');
+    container.innerHTML = '';
+
+    let visibleBlocks = DATA.blocks.filter(b => {
+        if (b.mask === 0) return false;
+        if (b.count === 0) return false;
+        return b.included.every(i => activeConditions[i]);
+    });
+
+    if (visibleBlocks.length === 0) {
+        document.getElementById('chart-inner').innerHTML = '<div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:#445;font-size:15px;">请在图例中激活至少一个条件</div>';
+        return;
+    }
+
+    // Sort by count desc
+    visibleBlocks.sort((a, b) => b.count - a.count);
+    const values = visibleBlocks.map(b => b.count);
+    const rects = squarify(values, { x: 0, y: 0, w: 100, h: 100 });
+
+    visibleBlocks.forEach((block, idx) => {
+        const r = rects[idx];
+        const cell = document.createElement('div');
+        cell.className = 'block-cell' + (selectedBlockMask === block.mask ? ' selected' : '');
+        cell.style.left = r.x + '%';
+        cell.style.top = r.y + '%';
+        cell.style.width = r.w + '%';
+        cell.style.height = r.h + '%';
+        cell.style.background = getBlockColor(block.included);
+
+        // Inner content based on cell size
+        const area = r.w * r.h;
+        if (area > 3) {
+            const inner = document.createElement('div');
+            inner.className = 'cell-inner';
+            // Condition dots
+            if (area > 8) {
+                let dots = '<div class="cond-dots">';
+                block.included.forEach(i => {
+                    const c = COLORS[i];
+                    dots += `<span style="background:rgb(${c.r},${c.g},${c.b})" title="${DATA.labels[i]}"></span>`;
+                });
+                dots += '</div>';
+                inner.innerHTML = dots;
+            }
+            if (area > 12) {
+                inner.innerHTML += `<div class="num">${block.count.toLocaleString()}</div>`;
+            }
+            if (area > 20) {
+                inner.innerHTML += `<div class="pct">${block.percentage}%</div>`;
+            }
+            cell.appendChild(inner);
+        }
+
+        cell.addEventListener('mouseenter', e => showTooltip(e, block));
+        cell.addEventListener('mousemove', e => moveTooltip(e));
+        cell.addEventListener('mouseleave', hideTooltip);
+        cell.addEventListener('click', () => { if (!hasDragged) toggleUserPanel(block); });
+        container.appendChild(cell);
+    });
+}
+
+// Squarified treemap
+function squarify(data, rect) {
+    if (data.length === 0) return [];
+    if (data.length === 1) return [{ x: rect.x, y: rect.y, w: rect.w, h: rect.h }];
+
+    const total = data.reduce((s, v) => s + v, 0);
+    const results = [];
+    _squarify(data, rect, total, results);
+    return results;
+}
+
+function _squarify(data, rect, total, results) {
+    if (data.length === 0) return;
+    if (data.length === 1) { results.push({ x: rect.x, y: rect.y, w: rect.w, h: rect.h }); return; }
+
+    // Find best split
+    const horizontal = rect.w >= rect.h;
+    let sum = 0, bestIdx = 0;
+    const half = total / 2;
+    for (let i = 0; i < data.length; i++) {
+        sum += data[i];
+        if (sum >= half) { bestIdx = i; break; }
+    }
+    bestIdx = Math.max(0, Math.min(bestIdx, data.length - 2));
+
+    const left = data.slice(0, bestIdx + 1);
+    const right = data.slice(bestIdx + 1);
+    const leftSum = left.reduce((s, v) => s + v, 0);
+    const rightSum = right.reduce((s, v) => s + v, 0);
+    const ratio = leftSum / total;
+
+    if (horizontal) {
+        const sw = rect.w * ratio;
+        _squarify(left, { x: rect.x, y: rect.y, w: sw, h: rect.h }, leftSum, results);
+        _squarify(right, { x: rect.x + sw, y: rect.y, w: rect.w - sw, h: rect.h }, rightSum, results);
+    } else {
+        const sh = rect.h * ratio;
+        _squarify(left, { x: rect.x, y: rect.y, w: rect.w, h: sh }, leftSum, results);
+        _squarify(right, { x: rect.x, y: rect.y + sh, w: rect.w, h: rect.h - sh }, rightSum, results);
+    }
+}
+
+function showTooltip(e, block) {
+    const tip = document.getElementById('tooltip');
+    let html = '<strong>互斥分群块</strong><br><br>';
+    if (block.included.length === 0) {
+        html += '❌ 未命中任何条件<br>';
+    } else {
+        html += '<strong>满足以下全部条件:</strong><br>';
+        block.included.forEach(i => {
+            const c = COLORS[i];
+            html += `<span style="color:rgb(${c.r},${c.g},${c.b})">■</span> ${DATA.labels[i]}<br>`;
+        });
+    }
+    const activeExcluded = block.excluded.filter(i => activeConditions[i]);
+    if (activeExcluded.length > 0) {
+        html += '<br><span style="color:#888"><strong>且不满足:</strong></span><br>';
+        activeExcluded.forEach(i => { html += `<span style="color:#555">□</span> <span style="color:#888">${DATA.labels[i]}</span><br>`; });
+    }
+    html += `<br>👥 <strong>${block.count.toLocaleString()}</strong> 人<br>`;
+    html += `📊 占全体 <strong>${block.percentage}%</strong>`;
+    tip.innerHTML = html;
+    tip.classList.add('visible');
+    moveTooltip(e);
+}
+
+function moveTooltip(e) {
+    const tip = document.getElementById('tooltip');
+    let left = e.clientX + 16, top = e.clientY + 16;
+    if (left + 350 > window.innerWidth) left = e.clientX - 360;
+    if (top + 250 > window.innerHeight) top = e.clientY - 260;
+    tip.style.left = left + 'px';
+    tip.style.top = top + 'px';
+}
+
+function hideTooltip() { document.getElementById('tooltip').classList.remove('visible'); }
+
+function renderNoneBlock() {
+    const none = DATA.blocks.find(b => b.mask === 0);
+    if (!none) return;
+    document.getElementById('none-text').textContent = `${none.count.toLocaleString()} 人 (${none.percentage}%)`;
+    const el = document.getElementById('none-section');
+    el.addEventListener('mouseenter', e => showTooltip(e, none));
+    el.addEventListener('mousemove', e => moveTooltip(e));
+    el.addEventListener('mouseleave', hideTooltip);
+    el.addEventListener('click', () => toggleUserPanel(none));
+}
+
+function toggleUserPanel(block) {
+    const panel = document.getElementById('right-panel');
+    if (selectedBlockMask === block.mask) { closePanel(); return; }
+
+    selectedBlockMask = block.mask;
+    panel.classList.add('visible');
+
+    document.getElementById('rp-title').textContent =
+        block.included.length === 0 ? '未命中任何条件' :
+        '条件 ' + block.included.map(i => (i+1)).join(' ∩ ');
+
+    let defHtml = '';
+    if (block.included.length === 0) {
+        defHtml = '不满足任何一个条件的用户';
+    } else {
+        defHtml = '<strong>同时满足:</strong><br>';
+        block.included.forEach(i => {
+            const c = COLORS[i];
+            defHtml += `<span style="color:rgb(${c.r},${c.g},${c.b})">■</span> ${DATA.labels[i]}<br>`;
+        });
+        const ae = block.excluded.filter(i => activeConditions[i]);
+        if (ae.length > 0) {
+            defHtml += '<br><strong>且不满足:</strong><br>';
+            ae.forEach(i => { defHtml += `<span style="color:#555">□</span> ${DATA.labels[i]}<br>`; });
+        }
+    }
+    defHtml += `<br>👥 <strong>${block.count.toLocaleString()}</strong> 人 · <strong>${block.percentage}%</strong>`;
+    document.getElementById('rp-def').innerHTML = defHtml;
+
+    // Lazy user list
+    const ul = document.getElementById('rp-users');
+    ul.innerHTML = '';
+    const BATCH = 200;
+    let pos = 0;
+    function loadBatch() {
+        const frag = document.createDocumentFragment();
+        const end = Math.min(pos + BATCH, block.users.length);
+        for (let i = pos; i < end; i++) {
+            const d = document.createElement('div');
+            d.textContent = block.users[i];
+            frag.appendChild(d);
+        }
+        ul.appendChild(frag);
+        pos = end;
+        if (pos < block.users.length) {
+            const more = document.createElement('div');
+            more.className = 'load-more';
+            more.textContent = `▼ 加载更多 (${pos.toLocaleString()} / ${block.users.length.toLocaleString()})`;
+            more.onclick = () => { more.remove(); loadBatch(); };
+            ul.appendChild(more);
+        }
+    }
+    loadBatch();
+
+    renderChart();
+    document.getElementById('none-section').classList.toggle('selected', block.mask === 0);
+}
+
+loadData();
+</script>
+</body>
+</html>
